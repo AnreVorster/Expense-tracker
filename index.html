@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Monthly Expenses</title>
+  <meta name="description" content="Track your spending per month from bank statement CSVs. Everything stays in your browser.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231f6f5c'/><rect x='7' y='16' width='4' height='9' rx='1' fill='white'/><rect x='14' y='10' width='4' height='15' rx='1' fill='white'/><rect x='21' y='6' width='4' height='19' rx='1' fill='white'/></svg>">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <h1>Monthly Expenses</h1>
+    </div>
+    <div class="month-nav" id="monthNav" hidden>
+      <button class="icon-btn" id="prevMonth" aria-label="Previous month">‹</button>
+      <select id="monthSelect" aria-label="Month"></select>
+      <button class="icon-btn" id="nextMonth" aria-label="Next month">›</button>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="importBtn">Import statement</button>
+      <button class="btn" id="settingsBtn">Categories &amp; rules</button>
+      <button class="btn" id="dataBtn">Backup</button>
+    </div>
+  </header>
+
+  <div class="banner warn" id="storageWarning" hidden>
+    Your browser is blocking storage, so nothing will be saved when you close this tab. Use Backup → Export before leaving.
+  </div>
+
+  <main>
+    <!-- Empty state -->
+    <section class="empty" id="emptyState" hidden>
+      <h2>Start with a bank statement</h2>
+      <p>Download your transactions as a <strong>CSV</strong> from your online banking, then import it here.
+         Your data never leaves this browser — there's no server.</p>
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="emptyFile" accept=".csv,.txt,text/csv" multiple>
+        <span class="dz-title">Drop CSV files here or click to choose</span>
+        <span class="dz-sub">You can import several months at once. Overlapping statements are de-duplicated.</span>
+      </label>
+      <details class="help">
+        <summary>Where do I get a CSV?</summary>
+        <ul>
+          <li>Log in to your bank's <strong>internet banking on a computer</strong> (apps often only offer PDF).</li>
+          <li>Open the account's <strong>transaction history</strong> and pick the date range.</li>
+          <li>Look for <strong>Download</strong> or <strong>Export</strong> and choose <strong>CSV</strong> (sometimes labelled "Excel/CSV" or "comma separated").</li>
+          <li>Only see PDF? That's a statement, not a transaction export — check the transaction history page instead. PDF layouts vary too much to read reliably.</li>
+        </ul>
+      </details>
+      <p class="muted small"><button class="link" id="loadSample">Or try it with sample data</button></p>
+    </section>
+
+    <!-- Dashboard -->
+    <section id="dashboard" hidden>
+      <div class="tiles">
+        <div class="tile"><span class="tile-label">Spent</span><span class="tile-value" id="tSpent"></span><span class="tile-sub" id="tSpentSub"></span></div>
+        <div class="tile"><span class="tile-label">Income</span><span class="tile-value" id="tIncome"></span><span class="tile-sub" id="tIncomeSub"></span></div>
+        <div class="tile"><span class="tile-label">Net</span><span class="tile-value" id="tNet"></span><span class="tile-sub" id="tNetSub"></span></div>
+        <button class="tile tile-action" id="tUncat"><span class="tile-label">Uncategorised</span><span class="tile-value" id="tUncatVal"></span><span class="tile-sub" id="tUncatSub"></span></button>
+      </div>
+
+      <div class="grid2">
+        <section class="card">
+          <div class="card-head">
+            <h2>Where it went</h2>
+            <span class="muted small" id="catHint">vs. average of previous 3 months</span>
+          </div>
+          <div id="catBars" class="catbars"></div>
+        </section>
+        <section class="card">
+          <div class="card-head">
+            <h2>Last 12 months</h2>
+            <span class="legend"><i class="sw spend"></i>Spent <i class="sw inc"></i>Income</span>
+          </div>
+          <div id="trend" class="trend"></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <div class="card-head wrap">
+          <h2 id="txTitle">Transactions</h2>
+          <div class="filters">
+            <input type="search" id="search" placeholder="Search descriptions" aria-label="Search">
+            <select id="catFilter" aria-label="Filter by category"></select>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="tx">
+            <thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="num">Amount</th><th></th></tr></thead>
+            <tbody id="txBody"></tbody>
+          </table>
+        </div>
+        <p class="muted small" id="txFoot"></p>
+      </section>
+    </section>
+  </main>
+
+  <!-- Import dialog -->
+  <dialog id="importDialog" class="dlg wide">
+    <form method="dialog" class="dlg-inner" id="importForm">
+      <header class="dlg-head"><h2>Import statement</h2><button class="icon-btn" value="cancel" aria-label="Close">×</button></header>
+      <div id="importPick">
+        <label class="dropzone small-dz">
+          <input type="file" id="importFile" accept=".csv,.txt,text/csv" multiple>
+          <span class="dz-title">Choose CSV files</span>
+          <span class="dz-sub">Each file is checked against what you've already imported.</span>
+        </label>
+      </div>
+      <div id="importMap" hidden>
+        <p class="muted small" id="importFileInfo"></p>
+        <div class="map-grid">
+          <label>Date column<select id="mDate"></select></label>
+          <label>Description column<select id="mDesc"></select></label>
+          <label>Amount style
+            <select id="mStyle">
+              <option value="single">One amount column (− is money out)</option>
+              <option value="split">Separate debit &amp; credit columns</option>
+            </select>
+          </label>
+          <label id="lAmount">Amount column<select id="mAmount"></select></label>
+          <label id="lDebit" hidden>Debit / money out<select id="mDebit"></select></label>
+          <label id="lCredit" hidden>Credit / money in<select id="mCredit"></select></label>
+          <label>Date format
+            <select id="mOrder">
+              <option value="DMY">Day / Month / Year</option>
+              <option value="MDY">Month / Day / Year</option>
+            </select>
+          </label>
+          <label>Account name<input id="mAccount" placeholder="e.g. Cheque, Credit card"></label>
+          <label class="check"><input type="checkbox" id="mInvert"> Flip signs <span class="muted small">(credit cards where purchases show as positive)</span></label>
+        </div>
+        <div class="preview-head">
+          <h3>Preview</h3>
+          <span class="small" id="previewStats"></span>
+        </div>
+        <div class="table-wrap preview">
+          <table class="tx"><thead><tr><th>Date</th><th>Description</th><th class="num">Amount</th></tr></thead><tbody id="previewBody"></tbody></table>
+        </div>
+      </div>
+      <footer class="dlg-foot">
+        <span class="small" id="importMsg"></span>
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn primary" id="importConfirm" value="default" disabled>Import</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Settings dialog -->
+  <dialog id="settingsDialog" class="dlg wide">
+    <form method="dialog" class="dlg-inner">
+      <header class="dlg-head"><h2>Categories &amp; rules</h2><button class="icon-btn" value="cancel" aria-label="Close">×</button></header>
+      <div class="settings-grid">
+        <section>
+          <h3>Categories</h3>
+          <p class="muted small"><strong>Transfer</strong> categories are left out of both spending and income — use them for moving money between your own accounts and paying off a credit card, or you'll count the same spend twice.</p>
+          <ul id="catList" class="plain-list"></ul>
+          <div class="inline-form">
+            <input id="newCatName" placeholder="New category">
+            <select id="newCatType"><option value="expense">Expense</option><option value="income">Income</option><option value="transfer">Transfer</option></select>
+            <button type="button" class="btn" id="addCat">Add</button>
+          </div>
+        </section>
+        <section>
+          <h3>Rules <span class="muted small">— first match wins, matched on whole words</span></h3>
+          <div class="inline-form">
+            <input id="newRulePattern" placeholder="Description contains…">
+            <select id="newRuleCat"></select>
+            <button type="button" class="btn" id="addRule">Add rule</button>
+          </div>
+          <input type="search" id="ruleSearch" placeholder="Filter rules" class="full">
+          <ul id="ruleList" class="plain-list rules"></ul>
+        </section>
+      </div>
+      <footer class="dlg-foot">
+        <label class="small">Currency
+          <select id="currency">
+            <option>ZAR</option><option>USD</option><option>EUR</option><option>GBP</option><option>AUD</option><option>NAD</option><option>BWP</option>
+          </select>
+        </label>
+        <button class="btn primary" value="close">Done</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Data dialog -->
+  <dialog id="dataDialog" class="dlg">
+    <form method="dialog" class="dlg-inner">
+      <header class="dlg-head"><h2>Backup</h2><button class="icon-btn" value="cancel" aria-label="Close">×</button></header>
+      <p class="small">Your data lives only in this browser. Clearing site data, private browsing, or switching devices loses it — export a backup after each import.</p>
+      <p class="small muted" id="dataStats"></p>
+      <div class="stack">
+        <button type="button" class="btn" id="exportJson">Export backup (.json)</button>
+        <label class="btn file-btn">Restore backup…<input type="file" id="importJson" accept=".json,application/json"></label>
+        <button type="button" class="btn" id="exportCsv">Export all transactions (.csv)</button>
+        <button type="button" class="btn danger" id="wipe">Delete all data</button>
+      </div>
+      <footer class="dlg-foot"><button class="btn primary" value="close">Done</button></footer>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
